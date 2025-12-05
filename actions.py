@@ -6,7 +6,8 @@ import asyncio
 import os
 import random
 import traceback
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Dict
 
 from astrbot.api.event import AstrMessageEvent
 
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
     from .main import VocabCardPlugin
 
 
-async def generate_and_send_card(word, plugin_dir, event: AstrMessageEvent):
+async def generate_and_send_card(word: Dict, plugin_dir: Path, event: AstrMessageEvent):
     """
     生成单词卡片并发送，然后清理临时文件
     
@@ -30,15 +31,12 @@ async def generate_and_send_card(word, plugin_dir, event: AstrMessageEvent):
     Yields:
         event results
     """
-    try:
-        image_path = generate_card_image(word, plugin_dir)
-        yield event.image_result(image_path)
-        
-        # 清理临时文件
-        if os.path.exists(image_path):
-            os.remove(image_path)
-    except Exception as e:
-        raise e
+    image_path = generate_card_image(word, plugin_dir)
+    yield event.image_result(image_path)
+    
+    # 清理临时文件
+    if os.path.exists(image_path):
+        os.remove(image_path)
 
 
 async def handle_vocab(plugin: "VocabCardPlugin", event: AstrMessageEvent):
