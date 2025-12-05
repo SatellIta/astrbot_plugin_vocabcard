@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from astrbot.api.event import AstrMessageEvent
 
-from .card_generator import generate_card_image
+from .card_generator import generate_card_image, generate_multi_word_card_image
 from .constants import HELP_MSG
 from .utils import get_beijing_time
 
@@ -18,33 +18,64 @@ if TYPE_CHECKING:
     from .main import VocabCardPlugin
 
 
-async def handle_vocab(plugin: "VocabCardPlugin", event: AstrMessageEvent):
-    """处理 /vocab 命令"""
-    user_id = event.get_user_id()
-    mode = plugin.config.get("learning_mode", "random")
-    word = plugin.progress_manager.select_word(user_id=user_id, mode=mode)
-
-    if not word:
-        yield event.plain_result("没有可用的单词数据")
-        return
+async def handle_vocab(plugin: "VocabCardPlugin", event: AstrMessageEvent, count_str: str):
+    """处理 /vocab 命令，支持一次获取多个单词"""
+    user_id = event.get_sender_id()
 
     try:
-        image_path = generate_card_image(word, plugin.plugin_dir)
+        count = int(count_str)
+    except (ValueError, TypeError):
+        count = 1
+    
+    count = max(1, min(count, 10))
+
+    mode = plugin.config.get("learning_mode", "random")
+    
+    words_to_learn = []
+    for _ in range(count):
+        word = plugin.progress_manager.select_word(user_id=user_id, mode=mode)
+        if word and word not in words_to_learn:
+            words_to_learn.append(word)
+        elif not word:
+            break
+
+    if not words_to_learn:
+        yield event.plain_result("当前没有可学习的新单词了。")
+        return
+
+    if len(words_to_learn) < count:
+        yield event.plain_result(f"可用的新单词不足，已为您找到 {len(words_to_learn)} 个。")
+
+    try:
+        image_path = None
+        # 根据单词数量选择不同的生成函数
+        if len(words_to_learn) > 1:
+            # yield event.plain_result(f"正在为您生成包含 {len(words_to_learn)} 个单词的卡片...")
+            image_path = generate_multi_word_card_image(words_to_learn, plugin.plugin_dir)
+        else:
+            image_path = generate_card_image(words_to_learn[0], plugin.plugin_dir)
+
         yield event.image_result(image_path)
         
-        plugin.progress_manager.mark_word_sent(word["word"], user_id=user_id)
+        # 标记所有单词为已发送
+        for word in words_to_learn:
+            plugin.progress_manager.mark_word_sent(word["word"], user_id=user_id)
 
         if os.path.exists(image_path):
-            os.remove(image_path)
-            
+            try:
+                os.remove(image_path)
+            except OSError as e:
+                plugin.logger.warning(f"删除临时图片失败: {e}")
+                
     except Exception as e:
-        plugin.logger.error(f"生成卡片失败: {e}")
-        yield event.plain_result(f"❌ 生成卡片失败: {e}")
+        plugin.logger.error(f"生成单词卡片失败: {e}\n{traceback.format_exc()}")
+        yield event.plain_result(f"❌ 生成单词卡片时出错")
+
 
 
 async def handle_status(plugin: "VocabCardPlugin", event: AstrMessageEvent):
     """处理 /vocab_status 命令，只显示个人进度"""
-    user_id = event.get_user_id()
+    user_id = event.get_sender_id()
     
     user_status = plugin.progress_manager.get_status(user_id)
     user_sent = user_status["sent"]
@@ -100,7 +131,7 @@ async def handle_test_push(plugin: "VocabCardPlugin", event: AstrMessageEvent, d
     if delay == 0:
         # 快速测试
         try:
-            user_id = event.get_user_id()
+            user_id = event.get_sender_id()
             word = plugin.progress_manager.select_word(user_id=user_id)
             if not word:
                 yield event.plain_result("没有可用的单词")
@@ -226,3 +257,43 @@ async def handle_push_now(plugin: "VocabCardPlugin", event: AstrMessageEvent):
 async def handle_help(plugin: "VocabCardPlugin", event: AstrMessageEvent):
     """处理 /vocab_help 命令"""
     yield event.plain_result(HELP_MSG)
+
+
+async def handle_recap(plugin: "VocabCardPlugin", event: AstrMessageEvent, count_str: str):
+    """处理 /vocab_recap 命令，复习已学过的单词"""
+    user_id = event.get_sender_id()
+
+    try:
+        count = int(count_str)
+    except (ValueError, TypeError):
+        count = 1
+    
+    count = max(1, min(count, 10))
+
+    words_to_recap = plugin.progress_manager.select_recap_words(user_id=user_id, count=count)
+
+    if not words_to_recap:
+        yield event.plain_result("你还没有学习过任何单词，快去用 /vocab 命令开始学习吧！")
+        return
+
+    if len(words_to_recap) < count:
+        yield event.plain_result(f"你总共只学了 {len(words_to_recap)} 个单词，已全部为你展示。")
+
+    try:
+        image_path = None
+        if len(words_to_recap) > 1:
+            image_path = generate_multi_word_card_image(words_to_recap, plugin.plugin_dir)
+        else:
+            image_path = generate_card_image(words_to_recap[0], plugin.plugin_dir)
+
+        yield event.image_result(image_path)
+
+        if os.path.exists(image_path):
+            try:
+                os.remove(image_path)
+            except OSError as e:
+                plugin.logger.warning(f"删除临时图片失败: {e}")
+                
+    except Exception as e:
+        plugin.logger.error(f"生成复习卡片失败: {e}\n{traceback.format_exc()}")
+        yield event.plain_result(f"❌ 生成复习卡片时出错")

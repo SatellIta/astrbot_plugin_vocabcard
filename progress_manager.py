@@ -3,6 +3,7 @@
 管理用户和全局学习进度
 """
 import json
+import random
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -16,6 +17,7 @@ class ProgressManager:
         self.progress_file = data_dir / "progress.json"
         self.words = words
         self.word_set = {w['word'] for w in self.words}
+        self.word_map = {w['word']: w for w in self.words}
         self.progress = self._load_progress()
 
     def _load_progress(self) -> Dict:
@@ -106,7 +108,6 @@ class ProgressManager:
         if mode == "sequential":
             return available_words[0]
         
-        import random
         return random.choice(available_words)
 
     def mark_word_sent(self, word: str, user_id: Optional[str] = None):
@@ -144,3 +145,25 @@ class ProgressManager:
             sent = len(self.progress["global"].get("sent_words", []))
             last_date = self.progress["global"].get("last_push_date", "从未")
             return {"type": "global", "sent": sent, "total": total, "last_date": last_date}
+
+    def select_recap_words(self, user_id: str, count: int) -> List[Dict]:
+        """
+        从用户已学单词中随机选择指定数量的单词进行复习。
+        """
+        user_progress = self._get_user_progress(user_id)
+        sent_words = user_progress.get("sent_words", [])
+
+        if not sent_words:
+            return []
+
+        # 如果请求的数量大于已学数量，则调整为已学数量
+        if count > len(sent_words):
+            count = len(sent_words)
+
+        # 随机选择单词
+        recap_word_strings = random.sample(sent_words, count)
+
+        # 获取完整的单词信息
+        recap_words = [self.word_map[word] for word in recap_word_strings if word in self.word_map]
+
+        return recap_words

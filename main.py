@@ -13,30 +13,32 @@ from typing import Optional, Dict, List
 
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.event import filter, AstrMessageEvent, MessageChain
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star, register, StarTools
 
 from . import actions
 from .card_generator import generate_card_image
 from .progress_manager import ProgressManager
 from .utils import get_beijing_time
 
-# This file is intentionally left blank.
-
-
-
-@register("vocabcard", "Assistant", "每日英语单词卡片（Pillow版）", "2.0.0")
+@register(
+    "vocabcard", 
+    "SatellIta", 
+    "每日英语单词卡片（Pillow版）", 
+    "2.0.0",
+    "https://github.com/SatellIta/astrbot_plugin_vocabcard")
 class VocabCardPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
         self.plugin_dir = Path(__file__).parent
-        self.data_dir = self.plugin_dir / "data"
 
-        # 加载词汇数据
-        self.words: List[Dict] = self._load_words()
-        
-        # 初始化进度管理器
-        self.progress_manager = ProgressManager(self.data_dir, self.words)
+        # 定义新旧数据目录
+        self.legacy_data_dir = self.plugin_dir / "data"
+        self.data_dir = StarTools.get_data_dir() / "vocabcard"
+
+        # 先声明，在 initialize 中进行初始化
+        self.words: List[Dict] = []
+        self.progress_manager: Optional[ProgressManager] = None
 
         # 定时任务相关
         self._scheduler_task: Optional[asyncio.Task] = None
@@ -46,23 +48,73 @@ class VocabCardPlugin(Star):
         self._last_check_date: str = ""
 
     def _load_words(self) -> List[Dict]:
-        """加载词汇数据"""
+        """从标准数据目录加载词汇数据"""
         words_file = self.data_dir / "words.json"
-        if words_file.exists():
-            try:
-                with open(words_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error(f"加载词汇数据失败: {e}")
-        return []
+        if not words_file.exists():
+            logger.warning(f"词汇文件不存在: {words_file}")
+            return []
+        try:
+            with open(words_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"加载词汇数据失败: {e}")
+            return []
 
     async def initialize(self):
-        """异步初始化"""
-        logger.info(f"单词卡片插件 v2 初始化完成，已加载 {len(self.words)} 个单词")
+        """异步初始化, 包括数据迁移"""
+        # 1. 确保目标数据目录存在
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+
+        # 2. 执行一次性数据迁移
+        await self._migrate_data()
+
+        # 3. 从新目录加载数据并初始化管理器
+        self.words = self._load_words()
+        self.progress_manager = ProgressManager(self.data_dir, self.words)
+        
+        logger.info(f"单词卡片插件 v2.1 初始化完成，已加载 {len(self.words)} 个单词。数据目录: {self.data_dir}")
+
+    async def _migrate_data(self):
+        """将旧数据目录的文件迁移到新目录"""
+        if not self.legacy_data_dir.is_dir():
+            return # 旧目录不存在，无需迁移
+
+        logger.info("检测到旧版 data 目录，开始进行数据迁移...")
+        files_to_migrate = ["words.json", "progress.json"]
+        migrated_count = 0
+
+        for filename in files_to_migrate:
+            old_file = self.legacy_data_dir / filename
+            new_file = self.data_dir / filename
+            
+            if old_file.exists() and not new_file.exists():
+                try:
+                    # 使用 pathlib.rename 进行移动，无需新库
+                    old_file.rename(new_file)
+                    logger.info(f"  - 已将 {filename} 迁移到新目录。")
+                    migrated_count += 1
+                except Exception as e:
+                    logger.error(f"  - 迁移 {filename} 失败: {e}")
+        
+        if migrated_count > 0:
+            logger.info("数据迁移成功！")
+        else:
+            logger.info("无需迁移文件，或文件已存在于新目录。")
+
+        # 尝试删除旧的空目录
+        try:
+            if not any(self.legacy_data_dir.iterdir()):
+                self.legacy_data_dir.rmdir()
+                logger.info("已移除空的旧版 data 目录。")
+        except Exception as e:
+            logger.warning(f"移除旧版 data 目录失败（可能非空）: {e}")
 
     @filter.on_astrbot_loaded()
     async def on_loaded(self):
         """AstrBot 启动后启动定时任务"""
+        if not self.words:
+            logger.error("词汇库为空，定时推送功能无法启动。")
+            return
         self._scheduler_task = asyncio.create_task(self._schedule_loop())
         logger.info("单词卡片定时任务已启动")
 
@@ -70,6 +122,12 @@ class VocabCardPlugin(Star):
         """定时任务主循环 - 智能睡眠，精准触发"""
         while True:
             try:
+                # 确保 progress_manager 已初始化
+                if not self.progress_manager:
+                    logger.warning("ProgressManager尚未初始化，等待10秒...")
+                    await asyncio.sleep(10)
+                    continue
+
                 now = get_beijing_time()
                 today_str = now.strftime("%Y-%m-%d")
 
@@ -120,7 +178,7 @@ class VocabCardPlugin(Star):
                 await asyncio.sleep(10)
 
             except Exception as e:
-                logger.error(f"定时任务出错: {e}")
+                logger.error(f"定时任务出错: {e}\n{traceback.format_exc()}")
                 await asyncio.sleep(60)  # 出错后等待 60 秒重试
 
     def _parse_time(self, time_str: str) -> tuple:
@@ -214,9 +272,14 @@ class VocabCardPlugin(Star):
         self._cached_image_path = None
 
     @filter.command("vocab")
-    async def cmd_vocab(self, event: AstrMessageEvent):
-        """手动获取一个单词卡片（记录个人进度）"""
-        async for result in actions.handle_vocab(self, event):
+    async def cmd_vocab(self, event: AstrMessageEvent, param: str = None):
+        """手动获取一个或多个单词卡片（记录个人进度）"""
+        if not param:
+            count = "1"
+        else:
+            count = param
+
+        async for result in actions.handle_vocab(self, event, count):
             yield result
 
     @filter.command("vocab_status")
@@ -259,6 +322,13 @@ class VocabCardPlugin(Star):
     async def cmd_help(self, event: AstrMessageEvent):
         """显示帮助信息"""
         async for result in actions.handle_help(self, event):
+            yield result
+
+    @filter.command("vocab_recap")
+    async def cmd_recap(self, event: AstrMessageEvent, param: str = None):
+        """复习已学过的单词"""
+        count = param if param else "1"
+        async for result in actions.handle_recap(self, event, count):
             yield result
 
     async def terminate(self):
