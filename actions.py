@@ -223,6 +223,62 @@ async def handle_push_now(plugin: "VocabCardPlugin", event: AstrMessageEvent):
         yield event.plain_result(f"❌ 推送失败: {e}")
 
 
+async def handle_vocab_recap(plugin: "VocabCardPlugin", event: AstrMessageEvent, count: str = "1"):
+    """处理 /vocab_recap 命令"""
+    user_id = event.get_user_id()
+    
+    # 解析复习数量参数
+    try:
+        recap_count = int(count)
+        if recap_count <= 0:
+            yield event.plain_result("❌ 复习数量必须大于0")
+            return
+        if recap_count > 10:
+            yield event.plain_result("❌ 一次最多只能复习10个单词")
+            return
+    except ValueError:
+        yield event.plain_result("❌ 请输入有效的数字")
+        return
+    
+    # 获取用户已学习的单词总数
+    user_status = plugin.progress_manager.get_status(user_id)
+    learned_count = user_status["sent"]
+    
+    if learned_count == 0:
+        yield event.plain_result("📚 你还没有学习过任何单词，请先使用 /vocab 学习新单词")
+        return
+    
+    # 检查复习数量是否超过已学习的总数
+    if recap_count > learned_count:
+        yield event.plain_result(f"⚠️ 你只学习了 {learned_count} 个单词，将为你复习全部已学单词")
+        recap_count = learned_count
+    
+    # 选择要复习的单词
+    review_words = plugin.progress_manager.select_review_words(user_id=user_id, count=recap_count)
+    
+    if not review_words:
+        yield event.plain_result("❌ 没有可复习的单词")
+        return
+    
+    yield event.plain_result(f"📖 开始复习 {len(review_words)} 个单词...")
+    
+    # 为每个单词生成卡片
+    for idx, word in enumerate(review_words, 1):
+        try:
+            image_path = generate_card_image(word, plugin.plugin_dir)
+            yield event.plain_result(f"[{idx}/{len(review_words)}] {word['word']}")
+            yield event.image_result(image_path)
+            
+            if os.path.exists(image_path):
+                os.remove(image_path)
+                
+        except Exception as e:
+            plugin.logger.error(f"生成复习卡片失败: {e}")
+            yield event.plain_result(f"❌ 生成卡片失败: {word['word']}")
+    
+    yield event.plain_result(f"✅ 复习完成！共复习了 {len(review_words)} 个单词")
+
+
 async def handle_help(plugin: "VocabCardPlugin", event: AstrMessageEvent):
     """处理 /vocab_help 命令"""
     yield event.plain_result(HELP_MSG)

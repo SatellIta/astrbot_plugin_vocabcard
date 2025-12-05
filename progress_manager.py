@@ -132,6 +132,38 @@ class ProgressManager:
         
         self._save_progress()
 
+    def select_review_words(self, user_id: Optional[str] = None, count: int = 1) -> List[Dict]:
+        """
+        选择已学习的单词用于复习。
+        如果提供了 user_id，则从用户已学单词中选择。
+        否则，从全局已学单词中选择。
+        
+        Args:
+            user_id: 用户ID，None表示使用全局进度
+            count: 要复习的单词数量，默认为1
+            
+        Returns:
+            已学单词的列表
+        """
+        sent_words: Set[str]
+        if user_id:
+            user_progress = self._get_user_progress(user_id)
+            sent_words = set(user_progress.get("sent_words", []))
+        else:  # 全局
+            sent_words = set(self.progress["global"].get("sent_words", []))
+        
+        # 从已学习的单词中筛选
+        learned_words = [w for w in self.words if w["word"] in sent_words]
+        
+        if not learned_words:
+            return []
+        
+        # 限制数量不超过已学习的总数
+        actual_count = min(count, len(learned_words))
+        
+        import random
+        return random.sample(learned_words, actual_count)
+
     def get_status(self, user_id: Optional[str] = None) -> Dict:
         """获取用户或全局的学习状态"""
         total = len(self.words)

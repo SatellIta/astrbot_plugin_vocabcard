@@ -219,6 +219,12 @@ class VocabCardPlugin(Star):
         async for result in actions.handle_vocab(self, event):
             yield result
 
+    @filter.command("vocab_recap")
+    async def cmd_vocab_recap(self, event: AstrMessageEvent, count: str = "1"):
+        """复习已学习的单词"""
+        async for result in actions.handle_vocab_recap(self, event, count):
+            yield result
+
     @filter.command("vocab_status")
     async def cmd_status(self, event: AstrMessageEvent):
         """查看个人和全局的学习进度"""
