@@ -3,6 +3,7 @@
 管理用户和全局学习进度
 """
 import json
+import random
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -106,7 +107,6 @@ class ProgressManager:
         if mode == "sequential":
             return available_words[0]
         
-        import random
         return random.choice(available_words)
 
     def mark_word_sent(self, word: str, user_id: Optional[str] = None):
@@ -161,7 +161,6 @@ class ProgressManager:
         # 限制数量不超过已学习的总数
         actual_count = min(count, len(learned_words))
         
-        import random
         return random.sample(learned_words, actual_count)
 
     def get_status(self, user_id: Optional[str] = None) -> Dict:

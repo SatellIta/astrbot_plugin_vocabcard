@@ -18,6 +18,29 @@ if TYPE_CHECKING:
     from .main import VocabCardPlugin
 
 
+async def generate_and_send_card(word, plugin_dir, event: AstrMessageEvent):
+    """
+    生成单词卡片并发送，然后清理临时文件
+    
+    Args:
+        word: 单词数据字典
+        plugin_dir: 插件目录路径
+        event: 消息事件
+        
+    Yields:
+        event results
+    """
+    try:
+        image_path = generate_card_image(word, plugin_dir)
+        yield event.image_result(image_path)
+        
+        # 清理临时文件
+        if os.path.exists(image_path):
+            os.remove(image_path)
+    except Exception as e:
+        raise e
+
+
 async def handle_vocab(plugin: "VocabCardPlugin", event: AstrMessageEvent):
     """处理 /vocab 命令"""
     user_id = event.get_user_id()
@@ -29,13 +52,10 @@ async def handle_vocab(plugin: "VocabCardPlugin", event: AstrMessageEvent):
         return
 
     try:
-        image_path = generate_card_image(word, plugin.plugin_dir)
-        yield event.image_result(image_path)
+        async for result in generate_and_send_card(word, plugin.plugin_dir, event):
+            yield result
         
         plugin.progress_manager.mark_word_sent(word["word"], user_id=user_id)
-
-        if os.path.exists(image_path):
-            os.remove(image_path)
             
     except Exception as e:
         plugin.logger.error(f"生成卡片失败: {e}")
@@ -265,13 +285,9 @@ async def handle_vocab_recap(plugin: "VocabCardPlugin", event: AstrMessageEvent,
     # 为每个单词生成卡片
     for idx, word in enumerate(review_words, 1):
         try:
-            image_path = generate_card_image(word, plugin.plugin_dir)
             yield event.plain_result(f"[{idx}/{len(review_words)}] {word['word']}")
-            yield event.image_result(image_path)
-            
-            if os.path.exists(image_path):
-                os.remove(image_path)
-                
+            async for result in generate_and_send_card(word, plugin.plugin_dir, event):
+                yield result
         except Exception as e:
             plugin.logger.error(f"生成复习卡片失败: {e}")
             yield event.plain_result(f"❌ 生成卡片失败: {word['word']}")
