@@ -143,7 +143,7 @@ class ProgressManager:
             count: 要复习的单词数量，默认为1
             
         Returns:
-            已学单词的列表
+            已学单词的列表，每个单词包含 word, phonetic, pos, definition_cn, example 等字段
         """
         sent_words: Set[str]
         if user_id:

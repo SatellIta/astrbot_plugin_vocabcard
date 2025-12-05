@@ -7,7 +7,7 @@ import os
 import random
 import traceback
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, Any
 
 from astrbot.api.event import AstrMessageEvent
 
@@ -19,12 +19,12 @@ if TYPE_CHECKING:
     from .main import VocabCardPlugin
 
 
-async def generate_and_send_card(word: Dict, plugin_dir: Path, event: AstrMessageEvent):
+async def generate_and_send_card(word: Dict[str, Any], plugin_dir: Path, event: AstrMessageEvent):
     """
     生成单词卡片并发送，然后清理临时文件
     
     Args:
-        word: 单词数据字典
+        word: 单词数据字典，包含 word, phonetic, pos, definition_cn, example 等字段
         plugin_dir: 插件目录路径
         event: 消息事件
         
